@@ -1,7 +1,8 @@
-using System;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using MultiThreading.Task3.MatrixMultiplier.Matrices;
 using MultiThreading.Task3.MatrixMultiplier.Multipliers;
+using System;
+using System.Diagnostics;
 
 namespace MultiThreading.Task3.MatrixMultiplier.Tests
 {
@@ -18,8 +19,24 @@ namespace MultiThreading.Task3.MatrixMultiplier.Tests
         [TestMethod]
         public void ParallelEfficiencyTest()
         {
-            // todo: implement a test method to check the size of the matrix which makes parallel multiplication more effective than
-            // todo: the regular one
+            var multiplier = new MatricesMultiplier();
+            var multiplierParallel = new MatricesMultiplierParallel();
+
+            var sw = new Stopwatch();
+            for (int matrixSize = 2; matrixSize <= byte.MaxValue; matrixSize++)
+            {
+                var matrix = new Matrix(matrixSize, matrixSize, true);
+                var multiplyTime = AverageTime(sw, () => multiplier.Multiply(matrix, matrix));
+                var multiplyParallelTime = AverageTime(sw, () => multiplierParallel.Multiply(matrix, matrix));
+
+                if (multiplyTime > multiplyParallelTime)
+                {
+                    Console.WriteLine("Starting from matrix size about {0} use parallel more efficiently.", matrixSize);
+                    return;
+                }
+            }
+
+            Assert.Fail();
         }
 
         #region private methods
@@ -71,6 +88,19 @@ namespace MultiThreading.Task3.MatrixMultiplier.Tests
             Assert.AreEqual(728, multiplied.GetElement(2, 2));
         }
 
+
+        private static long AverageTime(Stopwatch stopwatch, Action action)
+        {
+            const int iterations = 10;
+            double totalTime = 0;
+            for (int i = 0; i < iterations; i++)
+            {
+                stopwatch.Restart();
+                action();
+                totalTime += stopwatch.ElapsedMilliseconds;
+            }
+            return (long)(totalTime / iterations);
+        }
         #endregion
     }
 }

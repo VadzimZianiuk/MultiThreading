@@ -10,11 +10,15 @@
  */
 
 using System;
+using System.Threading;
 
 namespace MultiThreading.Task4.Threads.Join
 {
     class Program
     {
+        private const int ThreadCount = 10;
+        private static readonly SemaphoreSlim semaphore = new SemaphoreSlim(0,1);
+
         static void Main(string[] args)
         {
             Console.WriteLine("4.	Write a program which recursively creates 10 threads.");
@@ -26,9 +30,67 @@ namespace MultiThreading.Task4.Threads.Join
 
             Console.WriteLine();
 
-            // feel free to add your code
+            InitializeMenu();
+        }
 
-            Console.ReadLine();
+        private static void InitializeMenu()
+        {
+            Console.WriteLine("Main thread #{0}", Thread.CurrentThread.ManagedThreadId);
+            Console.WriteLine("Type 'a' or 'b' or 'x' to exit:");
+            while (true)
+            {
+                char key = Console.ReadKey().KeyChar;
+                Console.WriteLine();
+                switch (key)
+                {
+                    case 'a':
+                        CreateThreads(ThreadCount);
+                        break;
+                    case 'b':
+                        CreateThreadsThreadPool(ThreadCount);
+                        break;
+                    case 'x':
+                        return;
+                    default:
+                        Console.WriteLine("incorrect input.");
+                        break;
+                };
+            }
+        }
+
+        private static void CreateThreads(object sourceState)
+        {
+            int state = ChangeStateIfBackground(sourceState);
+            if (state > 0)
+            {
+                var tread = new Thread(new ParameterizedThreadStart(CreateThreads)){ IsBackground = true };
+                tread.Start(state);
+                tread.Join();
+            }
+        }
+
+        private static void CreateThreadsThreadPool(object sourceState)
+        {
+            int state = ChangeStateIfBackground(sourceState);
+            if (state > 0)
+            {
+                ThreadPool.QueueUserWorkItem(CreateThreadsThreadPool, state);
+                semaphore.Wait();
+            }
+            if (Thread.CurrentThread.IsBackground)
+            {
+                semaphore.Release();
+            }
+        }
+
+        private static int ChangeStateIfBackground(object sourceState)
+        {
+            int state = (int)sourceState;
+            if (Thread.CurrentThread.IsBackground)
+            {
+                Console.WriteLine("Thread #{0} state {1}", Thread.CurrentThread.ManagedThreadId, --state);
+            }
+            return state;
         }
     }
 }
