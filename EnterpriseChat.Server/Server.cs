@@ -40,9 +40,9 @@ namespace EnterpriseChat.Server
             try
             {
                 using var listener = GetListenerSocket();
+                _logger.WriteLine("Waiting for a connection to {0}...", listener.LocalEndPoint);
                 while (!_token.IsCancellationRequested)
                 {
-                    _logger.WriteLine("Waiting for a connection to {0}...", listener.LocalEndPoint);
                     listener.BeginAccept(new AsyncCallback(AcceptCallback), listener);
                     _eventWaitHandler.WaitOne();
                 }
@@ -114,7 +114,7 @@ namespace EnterpriseChat.Server
                 };
                 Parallel.ForEach(clients, options, client =>
                 {
-                    if (client.Connected)
+                    if (IsAlive(client))
                     {
                         client.BeginSend(byteData, 0, byteData.Length, 0, new AsyncCallback(SendCallback), client);
                     }
@@ -134,7 +134,7 @@ namespace EnterpriseChat.Server
                 var byteData = Encoding.Default.GetBytes($"History: {messages[i]}");
                 client.BeginSend(byteData, 0, byteData.Length, 0, new AsyncCallback(SendCallback), client);
                 
-                Task.Delay(5).Wait();
+                Task.Delay(1).Wait();
             }
         }
 
@@ -143,7 +143,10 @@ namespace EnterpriseChat.Server
             try
             {
                 var client = ar.AsyncState as Socket;
-                int bytesSent = client.EndSend(ar);
+                if (IsAlive(client))
+                {
+                    client.EndSend(ar);
+                }
             }
             catch (Exception ex)
             {
@@ -156,7 +159,6 @@ namespace EnterpriseChat.Server
             var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             socket.Bind(localEndPoint);
             socket.Listen(100);
-            _logger.WriteLine("Chat server is listening on port: {0}", _port);
             return socket;
         }
 

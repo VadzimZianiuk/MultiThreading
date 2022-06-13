@@ -59,7 +59,7 @@ namespace EnterpriseChat.Client
                         for (int i = 0; i < toSend && IsAlive(client); i++)
                         {
                             Send(client, $"Client #{_clientId} message {i}: {Guid.NewGuid()}");
-                            Task.Delay(TimeSpan.FromSeconds(GetRandom(1, 3))).Wait();
+                            Task.Delay(TimeSpan.FromMilliseconds(GetRandom(500, 1000))).Wait();
                         }
                     }).Wait();
 
@@ -73,7 +73,7 @@ namespace EnterpriseChat.Client
             }
             finally
             {
-                _logger.WriteLine("Client {0} disconnected from the server.", _clientId);
+                _logger.WriteLine("Client #{0} disconnected from the server.", _clientId);
                 eventWaitHandler.Set();
             }
         }
