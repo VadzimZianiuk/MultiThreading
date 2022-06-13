@@ -18,22 +18,13 @@ namespace EnterpriseChat.Common
 
         private readonly StringBuilder _sb = new();
 
-        public void Append(string value)
-        {
-            lock(_sb)
-            {
-                _sb.Append(value);
-            }
-        }
+        public void Append(string value) => _sb.Append(value);
 
         public override string ToString()
         {
-            lock(_sb)
-            {
-                var message = _sb.ToString();
-                _sb.Clear();
-                return message;
-            }
+            var message = _sb.ToString();
+            _sb.Clear();
+            return message;
         }
     }
 }

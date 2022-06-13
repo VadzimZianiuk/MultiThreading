@@ -30,7 +30,6 @@ namespace EnterpriseChat.Client
                     Interlocked.Increment(ref _clientId);
                     using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                     var localEndPoint = new IPEndPoint(IPAddress.Parse("127.0.0.1"), _port);
-                    _logger.WriteLine("Client #{0} connecting on port: {1}...", _clientId, _port);
                     socket.BeginConnect(localEndPoint, new AsyncCallback(ConnectCallback), socket);
                     eventWaitHandler.WaitOne();
                 }
@@ -46,26 +45,23 @@ namespace EnterpriseChat.Client
             try
             {
                 var client = ar.AsyncState as Socket;
+                _logger.WriteLine("Client #{0} connecting to {1}", _clientId, client.RemoteEndPoint);
                 if (IsAlive(client))
                 {
                     client.EndConnect(ar);
-                    _logger.WriteLine("Socket connected to {0}", client.RemoteEndPoint);
-
+                    
                     var message = new Message(client);
-                    Task.Run(() => client.BeginReceive(message.Buffer, 0, Message.BufferSize, 0, new AsyncCallback(ReadCallback), message));
+                    client.BeginReceive(message.Buffer, 0, Message.BufferSize, 0, new AsyncCallback(ReadCallback), message);
 
                     Task.Run(() =>
                     {
-                        var toSend = GetRandom(2, 5);
+                        var toSend = GetRandom(1, 5);
                         for (int i = 0; i < toSend && IsAlive(client); i++)
                         {
                             Send(client, $"Client #{_clientId} message {i}: {Guid.NewGuid()}");
                             Task.Delay(TimeSpan.FromSeconds(GetRandom(1, 3))).Wait();
                         }
                     }).Wait();
-
-                    Task.Delay(TimeSpan.FromSeconds(GetRandom(1, 5))).Wait();
-                    _logger.WriteLine("Client {0} disconnecting...", _clientId);
 
                     client.Shutdown(SocketShutdown.Both);
                     client.Close();
@@ -95,8 +91,10 @@ namespace EnterpriseChat.Client
                     if (bytesRead != Message.BufferSize)
                     {
                         var content = message.ToString();
+                        message = new Message(client);
                         _logger.WriteLine("Read {0} bytes from server: {1}", content.Length, content);
                     }
+
                     client.BeginReceive(message.Buffer, 0, Message.BufferSize, 0, new AsyncCallback(ReadCallback), message);
                 }
             }

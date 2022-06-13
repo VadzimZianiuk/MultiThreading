@@ -42,7 +42,7 @@ namespace EnterpriseChat.Server
                 using var listener = GetListenerSocket();
                 while (!_token.IsCancellationRequested)
                 {
-                    _logger.WriteLine("Waiting for a connection...");
+                    _logger.WriteLine("Waiting for a connection to {0}...", listener.LocalEndPoint);
                     listener.BeginAccept(new AsyncCallback(AcceptCallback), listener);
                     _eventWaitHandler.WaitOne();
                 }
@@ -88,11 +88,14 @@ namespace EnterpriseChat.Server
                     if (bytesRead != Message.BufferSize)
                     {
                         var content = message.ToString();
+                        message = new Message(client);
                         AddToHistory(content);
+
                         _clients.TryGetValue(client, out var id);
                         _logger.WriteLine("Read {0} bytes from client #{1}: {2}", content.Length, id, content);
                         Task.Run(() => BroadcastMessage(content));
                     }
+
                     client.BeginReceive(message.Buffer, 0, Message.BufferSize, 0, new AsyncCallback(ReadCallback), message);
                 }
             }
@@ -100,11 +103,16 @@ namespace EnterpriseChat.Server
 
         private void BroadcastMessage(string data)
         {
-            var byteData = Encoding.Default.GetBytes(data);
-            var clients = _clients.Select(x => x.Key).ToArray();
             try
             {
-                Parallel.ForEach(clients, new ParallelOptions() { CancellationToken = _token }, client =>
+                var byteData = Encoding.Default.GetBytes(data);
+                var clients = _clients.Select(x => x.Key).ToArray();
+                var options = new ParallelOptions() 
+                { 
+                    CancellationToken = _token, 
+                    MaxDegreeOfParallelism = Environment.ProcessorCount / 2 
+                };
+                Parallel.ForEach(clients, options, client =>
                 {
                     if (client.Connected)
                     {
@@ -123,8 +131,10 @@ namespace EnterpriseChat.Server
             var messages = _messageHistory.ToArray();
             for (int i = 0; i < messages.Length && IsAlive(client); i++)
             {
-                var byteData = Encoding.Default.GetBytes(messages[i]);
+                var byteData = Encoding.Default.GetBytes($"History: {messages[i]}");
                 client.BeginSend(byteData, 0, byteData.Length, 0, new AsyncCallback(SendCallback), client);
+                
+                Task.Delay(5).Wait();
             }
         }
 
