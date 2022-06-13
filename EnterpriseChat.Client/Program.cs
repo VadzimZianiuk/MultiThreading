@@ -1,17 +1,22 @@
-﻿namespace EnterpriseChat.Client
+﻿using EnterpriseChat.Common;
+
+namespace EnterpriseChat.Client
 {
     class Program
     {
         static void Main(string[] args)
         {
             const int Port = 1000;
+            const string loggerName = "[CLIENT] ";
 
-            Console.WriteLine("[CLIENT] Simple enterprise chat.");
-            Console.WriteLine("Press 'Enter' to exit...");
-            Console.WriteLine();
+            var logger = new Logger(loggerName, Console.Out);
+
+            logger.WriteLine("Simple enterprise chat.");
+            logger.WriteLine("Press 'Enter' to exit...");
+            logger.WriteLine();
             using var cts = new CancellationTokenSource();
 
-            Task.Run(() => new Client(Port, Console.Out, cts.Token).Start(), cts.Token);
+            Task.Run(() => new Client(Port, logger, cts.Token).Start(), cts.Token);
 
             Console.ReadLine();
             cts.Cancel(); 

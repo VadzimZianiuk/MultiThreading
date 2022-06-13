@@ -1,32 +1,29 @@
-﻿using System.Net;
+﻿using EnterpriseChat.Common;
+using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Collections.Concurrent;
 
 namespace EnterpriseChat.Server
 {
-    //TODO:
-    // 1. recheck correct cancellation
-    // 2. add delete client socket when it close connection
-    // 3. ....
     public class Server
     {
         private const int MessageHistorySize = 10;
-        private readonly AutoResetEvent eventWaitHandler = new(false);
-        private readonly ConcurrentQueue<string> MessageHistory= new();
-        private readonly ConcurrentDictionary<Socket, int> Clients = new();
+        private readonly AutoResetEvent _eventWaitHandler = new(false);
+        private readonly ConcurrentQueue<string> _messageHistory = new();
+        private readonly ConcurrentDictionary<Socket, int> _clients = new();
         private readonly object _startLock = new();
         private readonly int _port;
         private readonly CancellationToken _token;
-        private readonly TextWriter _logger;
+        private readonly ILogger _logger;
         private bool _isStarted;
         private int _clientId = 0;
 
-        public Server(int port, TextWriter logger, CancellationToken token)
+        public Server(int port, ILogger logger, CancellationToken token)
         {
             _port = port;
-            _token = token;
             _logger = logger;
+            _token = token;
         }
 
         public void StartListening()
@@ -39,7 +36,7 @@ namespace EnterpriseChat.Server
                 }
                 _isStarted = true;
             };
-  
+
             try
             {
                 using var listener = GetListenerSocket();
@@ -47,12 +44,12 @@ namespace EnterpriseChat.Server
                 {
                     _logger.WriteLine("Waiting for a connection...");
                     listener.BeginAccept(new AsyncCallback(AcceptCallback), listener);
-                    eventWaitHandler.WaitOne();
+                    _eventWaitHandler.WaitOne();
                 }
             }
             catch (Exception ex)
             {
-                _logger.WriteLine(ex);
+                _logger.WriteLine(ex.Message);
             }
             finally
             {
@@ -62,68 +59,71 @@ namespace EnterpriseChat.Server
 
         private void AcceptCallback(IAsyncResult ar)
         {
-            eventWaitHandler.Set();
-  
+            _eventWaitHandler.Set();
+
             var listener = ar.AsyncState as Socket;
             var client = listener.EndAccept(ar);
-            
-            if (client.Connected)
+            if (IsAlive(client))
             {
                 var id = Interlocked.Increment(ref _clientId);
-                Clients.TryAdd(client, id);
+                _clients.TryAdd(client, id);
+                _logger.WriteLine("Client #{0} connected.", id);
                 Task.Run(() => SendHistory(client));
 
-                var message = new Message { Client = client, Id = id };
+                var message = new Message(client);
                 client.BeginReceive(message.Buffer, 0, Message.BufferSize, 0, new AsyncCallback(ReadCallback), message);
             }
         }
 
-        public void ReadCallback(IAsyncResult ar)
+        private void ReadCallback(IAsyncResult ar)
         {
             var message = ar.AsyncState as Message;
             var client = message.Client;
-            if (!client.Connected)
+            if (IsAlive(client))
             {
-                Clients.TryRemove(client, out _);
-                return;
-            }
-
-            int bytesRead = client.EndReceive(ar);
-            if (bytesRead > 0)
-            {
-                message.Append(Encoding.Default.GetString(message.Buffer, 0, bytesRead));  
-                if (bytesRead != Message.BufferSize)
+                int bytesRead = client.EndReceive(ar);
+                if (bytesRead > 0)
                 {
-                    var content = message.ToString();
-                    MessageHistory.Enqueue(content);
-                    if (MessageHistory.Count > MessageHistorySize)
+                    message.Append(Encoding.Default.GetString(message.Buffer, 0, bytesRead));
+                    if (bytesRead != Message.BufferSize)
                     {
-                        MessageHistory.TryDequeue(out _);
+                        var content = message.ToString();
+                        AddToHistory(content);
+                        _clients.TryGetValue(client, out var id);
+                        _logger.WriteLine("Read {0} bytes from client #{1}: {2}", content.Length, id, content);
+                        Task.Run(() => BroadcastMessage(content));
                     }
-
-                    _logger.WriteLine($"Read {content.Length} bytes from client:{Environment.NewLine}{content}");
-                    Task.Run(() => BroadcastMessage(content));
-
-                    message.Clear();
+                    client.BeginReceive(message.Buffer, 0, Message.BufferSize, 0, new AsyncCallback(ReadCallback), message);
                 }
-                client.BeginReceive(message.Buffer, 0, Message.BufferSize, 0, new AsyncCallback(ReadCallback), message);
             }
         }
 
         private void BroadcastMessage(string data)
         {
             var byteData = Encoding.Default.GetBytes(data);
-            foreach (var (client,_) in Clients.Where(kvp => kvp.Key.Connected))
+            var clients = _clients.Select(x => x.Key).ToArray();
+            try
             {
-                client.BeginSend(byteData, 0, byteData.Length, 0, new AsyncCallback(SendCallback), client);
+                Parallel.ForEach(clients, new ParallelOptions() { CancellationToken = _token }, client =>
+                {
+                    if (client.Connected)
+                    {
+                        client.BeginSend(byteData, 0, byteData.Length, 0, new AsyncCallback(SendCallback), client);
+                    }
+                });
+            }
+            catch (OperationCanceledException ex)
+            {
+                _logger.WriteLine(ex.Message);
             }
         }
 
         private void SendHistory(Socket client)
         {
-            foreach (var message in MessageHistory.ToArray())
+            var messages = _messageHistory.ToArray();
+            for (int i = 0; i < messages.Length && IsAlive(client); i++)
             {
-                var byteData = Encoding.Default.GetBytes(message);
+                var byteData = Encoding.Default.GetBytes(messages[i]);
                 client.BeginSend(byteData, 0, byteData.Length, 0, new AsyncCallback(SendCallback), client);
             }
         }
@@ -134,8 +134,6 @@ namespace EnterpriseChat.Server
             {
                 var client = ar.AsyncState as Socket;
                 int bytesSent = client.EndSend(ar);
-                Clients.TryGetValue(client, out var id);
-                _logger.WriteLine($"Sent {bytesSent} bytes to client {id}");
             }
             catch (Exception ex)
             {
@@ -148,9 +146,30 @@ namespace EnterpriseChat.Server
             var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             socket.Bind(localEndPoint);
             socket.Listen(100);
-            _logger.WriteLine($"Chat server is listening on port: {_port}");
+            _logger.WriteLine("Chat server is listening on port: {0}", _port);
             return socket;
         }
 
+        private bool IsAlive(Socket client)
+        {
+            var isAlive = client.Connected && !_token.IsCancellationRequested;
+            if (!isAlive)
+            {
+                if (_clients.TryRemove(client, out var id))
+                {
+                    _logger.WriteLine("Client #{0} was disconnected.", id);
+                }
+            }
+            return isAlive;
+        }
+
+        private void AddToHistory(string content)
+        {
+            _messageHistory.Enqueue(content);
+            if (_messageHistory.Count > MessageHistorySize)
+            {
+                _messageHistory.TryDequeue(out _);
+            }
+        }
     }
 }
